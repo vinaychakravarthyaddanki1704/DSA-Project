@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Metro Map Planner</title>
+<style>
+  body { font-family: Arial, sans-serif; background: #f5f5f5; text-align: center; }
+  svg { border: 2px solid #333; background: #fff; margin-top: 20px; }
+  .line { stroke-width: 4; fill: none; }
+  .line-other { stroke: #2196F3; opacity: 0.6; }
+  .line-shortest { stroke: red; opacity: 1; }
+  .station { stroke: #333; stroke-width: 2; cursor: pointer; }
+  .station-circle { r: 8; fill: white; stroke-width: 2; }
+  .station-highlight { fill: red; stroke-width: 3; }
+  .station-label { font-size: 12px; pointer-events: none; }
+  #controls { margin-top: 20px; }
+  select, button { padding: 5px 10px; font-size: 14px; }
+  #routeDescription { margin-top: 20px; font-size: 16px; background: #fff; display: inline-block; padding: 15px; border-radius: 8px; max-width: 90%; text-align: left; }
+</style>
+</head>
+<body>
+
+<h1>Metro Route Planner</h1>
+
+<div id="controls">
+  <label>Source: <select id="src"></select></label>
+  <label>Destination: <select id="dest"></select></label>
+  <button onclick="planTrip()">Find Route</button>
+</div>
+
+<svg id="map" width="1000" height="600"></svg>
+
+<div id="routeDescription"></div>
+
+<script>
+// Clean layout positions for stations
+const stations = {
+  "Miyapur": {x:50,y:50}, "JNTU College": {x:150,y:50}, "KPHB Colony": {x:250,y:50},
+  "Kukatpally": {x:350,y:50}, "Balanagar": {x:450,y:50}, "Moosapet": {x:550,y:50},
+  "Bharat Nagar": {x:650,y:50}, "Erragadda": {x:750,y:50}, "ESI Hospital": {x:850,y:50},
+  "S.R. Nagar": {x:950,y:50}, "Ameerpet": {x:950,y:150}, "Punjagutta": {x:950,y:250},
+  "Irrum Manzil": {x:950,y:350}, "Khairatabad": {x:950,y:450}, "Lakdi-ka-pul": {x:950,y:550},
+  "Assembly": {x:850,y:550}, "Nampally": {x:750,y:550}, "Gandhi Bhavan": {x:650,y:550},
+  "Osmania Medical College": {x:550,y:550}, "MGBS": {x:450,y:550}, "Malakpet": {x:350,y:550},
+  "New Market": {x:250,y:550}, "Chaderghat": {x:150,y:550}, "Dilsukhnagar": {x:50,y:550},
+  "Moosarambagh": {x:150,y:450}, "LB Nagar": {x:250,y:450},
+
+  "Nagole": {x:950,y:300}, "Uppal": {x:850,y:300}, "Stadium": {x:750,y:300},
+  "NGRI": {x:650,y:300}, "Habsiguda": {x:550,y:300}, "Tarnaka": {x:450,y:300},
+  "Mettuguda": {x:350,y:300}, "Secunderabad East": {x:250,y:300}, "Paradise": {x:150,y:300},
+  "Prakash Nagar": {x:50,y:300}, "Rasoolpura": {x:50,y:200}, "Begumpet": {x:150,y:200},
+  "Madhura Nagar": {x:250,y:200}, "Yousufguda": {x:350,y:200}, "Jubilee Hills Road No.5": {x:450,y:200},
+  "Jubilee Hills Check Post": {x:550,y:200}, "Peddamma Temple": {x:650,y:200}, "Madhapur": {x:750,y:200},
+  "Durgam Cheruvu": {x:850,y:200}, "Hitec City": {x:950,y:200}, "Raidurg": {x:1050,y:200},
+
+  "JBS Parade Ground": {x:50,y:400}, "Secunderabad West": {x:150,y:400}, "Gandhi Hospital": {x:250,y:400},
+  "Musheerabad": {x:350,y:400}, "RTC X Roads": {x:450,y:400}, "Chikkadpally": {x:550,y:400},
+  "Narayanguda": {x:650,y:400}, "Sultan Bazar": {x:750,y:400}, "MGBS": {x:850,y:400}
+};
+
+// Graph and lines
+const graph = {};
+for (const key in stations) graph[key] = [];
+const redLine = ["Miyapur","JNTU College","KPHB Colony","Kukatpally","Balanagar","Moosapet","Bharat Nagar","Erragadda","ESI Hospital","S.R. Nagar","Ameerpet","Punjagutta","Irrum Manzil","Khairatabad","Lakdi-ka-pul","Assembly","Nampally","Gandhi Bhavan","Osmania Medical College","MGBS","Malakpet","New Market","Chaderghat","Dilsukhnagar","Moosarambagh","LB Nagar"];
+const blueLine = ["Nagole","Uppal","Stadium","NGRI","Habsiguda","Tarnaka","Mettuguda","Secunderabad East","Paradise","Prakash Nagar","Rasoolpura","Begumpet","Ameerpet","Madhura Nagar","Yousufguda","Jubilee Hills Road No.5","Jubilee Hills Check Post","Peddamma Temple","Madhapur","Durgam Cheruvu","Hitec City","Raidurg"];
+const greenLine = ["JBS Parade Ground","Secunderabad West","Gandhi Hospital","Musheerabad","RTC X Roads","Chikkadpally","Narayanguda","Sultan Bazar","MGBS"];
+[redLine,blueLine,greenLine].forEach(line => {
+  for (let i=0;i<line.length-1;i++){
+    graph[line[i]].push(line[i+1]);
+    graph[line[i+1]].push(line[i]);
+  }
+});
+
+// BFS shortest path
+function shortestPath(start,end){
+  const queue=[[start]],visited=new Set([start]);
+  while(queue.length>0){
+    const path=queue.shift();
+    const node=path[path.length-1];
+    if(node===end) return path;
+    for(const n of graph[node]){
+      if(!visited.has(n)){
+        visited.add(n);
+        queue.push([...path,n]);
+      }
+    }
+  }
+  return null;
+}
+
+// Draw map
+function drawMap(pathStations=[]){
+  const svg=document.getElementById("map");
+  svg.innerHTML="";
+
+  function drawLine(lineArr,className){
+    for(let i=0;i<lineArr.length-1;i++){
+      const x1=stations[lineArr[i]].x,y1=stations[lineArr[i]].y;
+      const x2=stations[lineArr[i+1]].x,y2=stations[lineArr[i+1]].y;
+      const line=document.createElementNS("http://www.w3.org/2000/svg","line");
+      line.setAttribute("x1",x1); line.setAttribute("y1",y1);
+      line.setAttribute("x2",x2); line.setAttribute("y2",y2);
+      line.setAttribute("class",className);
+      svg.appendChild(line);
+    }
+  }
+
+  drawLine(redLine,"line line-other");
+  drawLine(blueLine,"line line-other");
+  drawLine(greenLine,"line line-other");
+  if(pathStations.length>1) drawLine(pathStations,"line line-shortest");
+
+  // Draw stations
+  for(const [name,pos] of Object.entries(stations)){
+    const circle=document.createElementNS("http://www.w3.org/2000/svg","circle");
+    circle.setAttribute("cx",pos.x);
+    circle.setAttribute("cy",pos.y);
+    circle.setAttribute("r",8);
+    circle.setAttribute("class","station");
+    if(pathStations.includes(name)) circle.classList.add("station-highlight");
+    svg.appendChild(circle);
+
+    const label=document.createElementNS("http://www.w3.org/2000/svg","text");
+    label.setAttribute("x",pos.x+10);
+    label.setAttribute("y",pos.y-10);
+    label.setAttribute("class","station-label");
+    label.textContent=name;
+    svg.appendChild(label);
+  }
+}
+
+// Populate dropdowns
+const srcSelect=document.getElementById("src");
+const destSelect=document.getElementById("dest");
+Object.keys(stations).sort().forEach(s=>{
+  const o1=document.createElement("option"); o1.value=s; o1.textContent=s; srcSelect.appendChild(o1);
+  const o2=document.createElement("option"); o2.value=s; o2.textContent=s; destSelect.appendChild(o2);
+});
+srcSelect.value="Miyapur"; destSelect.value="LB Nagar";
+
+const routeDescriptionDiv=document.getElementById("routeDescription");
+const FARE_PER_EDGE=5,TIME_PER_EDGE=2;
+
+// Plan trip
+function planTrip(){
+  const src=srcSelect.value,dest=destSelect.value;
+  if(src===dest){ alert("Choose different source and destination."); return; }
+  const path=shortestPath(src,dest);
+  if(!path){ routeDescriptionDiv.textContent=`No path between ${src} and ${dest}`; drawMap(); return; }
+
+  drawMap(path);
+
+  const edges=path.length-1;
+  routeDescriptionDiv.innerHTML=`
+    <strong>Route from <em>${src}</em> to <em>${dest}</em>:</strong><br>
+    ${path.map((s,i)=>i===path.length-1?s:s+" ➔ ").join('')}<br><br>
+    <strong>Estimated Fare:</strong> ₹${edges*FARE_PER_EDGE}<br>
+    <strong>Estimated Time:</strong> ${edges*TIME_PER_EDGE} minutes
+  `;
+}
+
+// Initial map
+drawMap();
+</script>
+</body>
+</html>
